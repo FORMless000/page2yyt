@@ -1,0 +1,287 @@
+<html>
+
+<head>
+    <title>FALLING MACARONI BY yiy523</title>
+
+    <style>
+        .container {
+            position: relative;
+        }
+
+        #overlay {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            color: white;
+        }
+    </style>
+
+    <script type="text/javascript" src="../lib/gl-matrix-3.4.0min.js"></script>
+    <script type="text/javascript" src="../lib/webglutils.js"></script>
+
+
+    <script id="frag_flat" type="x-shader/x-fragment">
+        ////////////////////////////////////////////////////////
+        ///FRAGMENT SHADER START
+        ////////////////////////////////////////////////////////
+        precision mediump float;
+        varying vec4 vColor;
+        varying vec2 vTextureCoord;
+        varying vec3 vLightWeighting;
+        //varying float vSpecularity;
+        uniform sampler2D uSampler;
+        uniform bool uUseTexture;	//turns textures on and off
+        void main(void) {
+            //gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+            vec4 textureColor;
+            if(uUseTexture){
+                textureColor = texture2D(uSampler, vec2(vTextureCoord.s, vTextureCoord.t));
+            }else{
+                textureColor = vec4(1.0, 1.0, 1.0, 1.0);
+            }
+            //fallback?
+            //if (textureColor == vec4(0,0,0,0)){
+            //    textureColor == vec4(1,1,1,1);
+            //}
+            textureColor = textureColor * vColor;//  + vec4(0.1, 0.1, 0.1, 1.0);
+            gl_FragColor = vec4(textureColor.rgb*vLightWeighting, textureColor.a) ;
+        }
+        ////////////////////////////////////////////////////////
+        ///FRAGMENT SHADER END
+        ////////////////////////////////////////////////////////
+    </script>
+    <script id="vert_flat" type="x-shader/x-vertex">
+        struct Light{
+            bool enabled;
+            bool isDirectional;
+            vec3 position;
+            vec3 color;
+            float fade;
+        };
+        //////////////////////////////////////////////////////
+        ///VERTEX SHADER START
+        //////////////////////////////////////////////////////
+        ///Attributes are inputs provided for each vertex,
+        ///different for each vertex in the rendering call
+        ///input: vertex position
+        attribute vec3 aVertexPosition;
+        attribute vec4 aVertexColor;	
+        attribute vec2 aTextureCoord;
+        attribute vec3 aVertexNormal;
+        //Uniforms are inputs provided for ALL Vertices, 
+        //the same for all vertices in any rendering call
+        uniform mat4 uMVMatrix; //?
+        uniform mat4 uPMatrix; //?
+        uniform mat3 uNMatrix; //?
+
+        uniform vec3 uAmbientColor;		//ambient color
+        uniform Light uLight[8];
+        //uniform vec3 uLightingDirection;	//direction of light
+        //uniform vec3 uDirectionalColor;	//color of directional light
+        uniform bool uUseLighting;	//turns lighting on and off
+
+        uniform float uSpecularity;
+        uniform float uDiffusion;
+
+        varying vec4 vColor;
+        varying vec3 vLightWeighting;		//output light weighting
+        varying vec2 vTextureCoord;
+
+        //varying float vSpecularity;
+        void main(void) {
+            gl_Position = uPMatrix * uMVMatrix * vec4(aVertexPosition, 1.0);
+            vColor = aVertexColor;
+            vTextureCoord = aTextureCoord;
+
+            vec3 transformedVertexPosition = (uMVMatrix * vec4(aVertexPosition, 1.0)).xyz;  //transformed vertex position
+            vec3 transformedNormal = uNMatrix * aVertexNormal;
+
+            if (!uUseLighting) {
+                //light is white by default
+                vLightWeighting = vec3(1.0, 1.0, 1.0);
+            } else {
+                vLightWeighting = uAmbientColor;
+                //support multiple lights
+                for (int i=0; i<8; ++i){
+                    if(uLight[i].enabled){
+                        //calculate the diffusion light weighting
+                        vec3 lightingDirection;
+                        float fadeFactor = 1.0;
+                        if(uLight[i].isDirectional){
+                            lightingDirection = uLight[i].position;
+                        } else{
+                            //vec3 lightPos = (uMVMatrix * vec4(uLight[i].position, 1.0)).xyz;
+                            vec3 lightPos = uLight[i].position;
+                            lightingDirection = normalize(lightPos - transformedVertexPosition);
+                            if(uLight[i].fade != 0.0){
+                                fadeFactor = 1.0 / (distance(lightPos, transformedVertexPosition) * uLight[i].fade);
+                            }
+                        }
+                        float directionalLightWeighting = max(dot(transformedNormal, lightingDirection), 0.0);
+                        vLightWeighting += uLight[i].color * uDiffusion * directionalLightWeighting * fadeFactor;
+                        //specularity
+                        vec3 reflection = reflect(normalize(lightingDirection), normalize(transformedNormal));
+                        float specularLightWeighting = max(dot(normalize(reflection), normalize(transformedVertexPosition)), 0.0);
+                        vLightWeighting += uLight[i].color * uSpecularity * specularLightWeighting * fadeFactor;
+                    }
+                }
+            }
+
+
+        }
+        //////////////////////////////////////////////////////
+        ///VERTEX SHADER END
+        //////////////////////////////////////////////////////
+    </script>
+
+
+
+    <script id="frag_phong" type="x-shader/x-fragment">
+        ////////////////////////////////////////////////////////
+        ///FRAGMENT SHADER START
+        ////////////////////////////////////////////////////////
+        precision mediump float;
+        struct Light{
+            bool enabled;
+            bool isDirectional;
+            vec3 position;
+            vec3 color;
+            float fade;
+        };
+
+        uniform vec3 uAmbientColor;		//ambient color
+        uniform Light uLight[8];
+        //uniform vec3 uLightingDirection;	//direction of light
+        //uniform vec3 uDirectionalColor;	//color of directional light
+        uniform bool uUseLighting;	//turns lighting on and off
+
+        uniform float uSpecularity;
+        uniform float uDiffusion;
+
+        varying vec4 vColor;
+        varying vec2 vTextureCoord;
+        varying vec3 vTransformedVertexPosition;
+        varying vec3 vTransformedNormal;
+        //varying float vSpecularity;
+        uniform sampler2D uSampler;
+        uniform bool uUseTexture;	//turns textures on and off
+        void main(void) {
+            //gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+            
+            vec3 lightWeighting;
+            vec4 textureColor;
+
+            if(uUseTexture){
+                textureColor = texture2D(uSampler, vec2(vTextureCoord.s, vTextureCoord.t));
+            }else{
+                textureColor = vec4(1.0, 1.0, 1.0, 1.0);
+            }
+
+            if (!uUseLighting) {
+                //light is white by default
+                lightWeighting = vec3(1.0, 1.0, 1.0);
+            } else {
+                lightWeighting = uAmbientColor;
+                //support multiple lights
+                for (int i=0; i<8; ++i){
+                    if(uLight[i].enabled){
+                        //calculate the diffusion light weighting
+                        vec3 lightingDirection;
+                        float fadeFactor = 1.0;
+                        if(uLight[i].isDirectional){
+                            lightingDirection = uLight[i].position;
+                        } else{
+                            //vec3 lightPos = (uMVMatrix * vec4(uLight[i].position, 1.0)).xyz;
+                            vec3 lightPos = uLight[i].position;
+                            lightingDirection = normalize(lightPos - vTransformedVertexPosition);
+                            if(uLight[i].fade != 0.0){
+                                fadeFactor = 1.0 / (distance(lightPos, vTransformedVertexPosition) * uLight[i].fade);
+                            }
+                        }
+                        float directionalLightWeighting = max(dot(vTransformedNormal, lightingDirection), 0.0);
+                        lightWeighting += uLight[i].color * uDiffusion * directionalLightWeighting * fadeFactor;
+                        //specularity
+                        vec3 reflection = reflect(normalize(lightingDirection), normalize(vTransformedNormal));
+                        float specularLightWeighting = pow(max(dot(normalize(reflection), normalize(vTransformedVertexPosition)), 0.0), 3.0);
+                        lightWeighting += uLight[i].color * uSpecularity * specularLightWeighting * fadeFactor;
+                    }
+                }
+            }
+
+            //fallback?
+            //if (textureColor == vec4(0,0,0,0)){
+            //    textureColor == vec4(1,1,1,1);
+            //}
+            textureColor = textureColor * vColor;//  + vec4(0.1, 0.1, 0.1, 1.0);
+            gl_FragColor = vec4(textureColor.rgb*lightWeighting, textureColor.a) ;
+        }
+        ////////////////////////////////////////////////////////
+        ///FRAGMENT SHADER END
+        ////////////////////////////////////////////////////////
+    </script>
+    
+    <script id="vert_phong" type="x-shader/x-vertex">
+        //////////////////////////////////////////////////////
+        ///VERTEX SHADER START
+        //////////////////////////////////////////////////////
+        ///Attributes are inputs provided for each vertex,
+        ///different for each vertex in the rendering call
+        ///input: vertex position
+        //precision mediump float;
+        attribute vec3 aVertexPosition;
+        attribute vec4 aVertexColor;	
+        attribute vec2 aTextureCoord;
+        attribute vec3 aVertexNormal;
+        //Uniforms are inputs provided for ALL Vertices, 
+        //the same for all vertices in any rendering call
+        uniform mat4 uMVMatrix; //?
+        uniform mat4 uPMatrix; //?
+        uniform mat3 uNMatrix; //?
+
+
+        varying vec4 vColor;
+        varying vec2 vTextureCoord;
+        varying vec3 vTransformedVertexPosition;
+        varying vec3 vTransformedNormal;
+
+        //varying float vSpecularity;
+        void main(void) {
+            gl_Position = uPMatrix * uMVMatrix * vec4(aVertexPosition, 1.0);
+            vColor = aVertexColor;
+            vTextureCoord = aTextureCoord;
+            vTransformedVertexPosition = (uMVMatrix * vec4(aVertexPosition, 1.0)).xyz;  //transformed vertex position
+            vTransformedNormal = uNMatrix * aVertexNormal;
+        }
+        //////////////////////////////////////////////////////
+        ///VERTEX SHADER END
+        //////////////////////////////////////////////////////
+    </script>
+
+    <script type="text/javascript" src="./ObjectToDraw.js"> </script>
+    <script type="text/javascript" src="./app-extra.js"> </script>
+
+</head>
+
+
+
+
+
+<body onload="webGLStart();">
+    <canvas id="webGLcanvas" style="border: none;">
+    </canvas>
+
+    <div id="overlay">
+        <div> I decide to do this because <span id="posX"></span></div>
+        <div> In the raytracer it took me 1 hour fixing my little makeshift engine. <span id="posY"></span></div>
+        <div> This project will probably take less time than that! <span id="rotX"></span></div>
+        <div> Nothing is editable though. Just enjoy! <span id="rotY"></span></div>
+        <div> ... </div>
+        <div> Edit: it was done and ugly. Macaroni? More like moldy froot loops.</div>
+        <div> Apparently the demo used something like area ambient or coned lights.</div>
+        <div> Using 3 point lights just can't look that good. Sad.</div>
+    </div>
+
+
+</body>
+
+</html>
